@@ -97,10 +97,11 @@ input[type=checkbox]{width:18px; height:18px; accent-color:var(--brand);}
 #progressText{font-size:13px; color:var(--muted); white-space:nowrap;}
 #practiceList{list-style:none; margin:0; padding:0; max-height:48vh; overflow:auto; border:1px solid var(--line); border-radius:12px;}
 #practiceList li{display:flex; gap:8px; padding:9px 12px; border-bottom:1px solid var(--line); align-items:flex-start; cursor:pointer;}
+#practiceList li .pw-play{flex-shrink:0; width:34px; height:34px; padding:0; font-size:15px; border:none; background:#eef2fb; border-radius:9px; color:var(--brand-dark); display:flex; align-items:center; justify-content:center; cursor:pointer;}
 #practiceList li:last-child{border-bottom:none;}
 #practiceList li .idx{color:#c3cad8; font-size:12px; width:22px; flex-shrink:0; padding-top:2px; font-variant-numeric:tabular-nums;}
 #practiceList li .pmain{flex:1; min-width:0;}
-#practiceList li.cur{background:#eaf1ff;}
+#practiceList li.cur{background:#d6e6ff; box-shadow:inset 3px 0 0 var(--brand);}
 #practiceList li .w-en{font-weight:600; word-break:break-word;}
 #practiceList li .w-zh{font-size:12px; color:var(--muted); word-break:break-word;}
 #practiceList li .w-ph{font-size:12px; color:#9aa4b8; font-family:Georgia,serif;}
@@ -159,6 +160,7 @@ details.advanced{margin-top:4px;}
 
   <!-- ============ 跟读 ============ -->
   <section id="view-practice" style="display:none;">
+    <p class="hint" style="padding:0 4px 10px;">💡 若没声音：请用系统浏览器打开（iPhone 用 Safari、安卓用 Chrome）；微信内置浏览器可能无法发音。</p>
     <div class="card">
       <h2>选择单元 <span class="badge" id="selCount"></span></h2>
       <div class="btn-row" style="margin-bottom:8px;">
@@ -171,6 +173,9 @@ details.advanced{margin-top:4px;}
 
     <div class="card">
       <h2>跟读设置</h2>
+      <div class="btn-row" style="margin-bottom:6px;">
+        <button id="btnTestVoice" style="font-size:13px; padding:7px 12px;">🔊 测试发音</button>
+      </div>
       <div class="field">
         <label>朗读语言</label>
         <div class="seg" id="segLang">
@@ -324,20 +329,49 @@ function fillVoiceSelects(){
 }
 function langOf(uri){const v=speechSynthesis.getVoices().find(x=>x.voiceURI===uri);return v?v.lang:'';}
 function enLang(){return settings.enVoiceURI?langOf(settings.enVoiceURI):'en-US';}
+let curUtterance=null; // 保持引用，避免 iOS 上 utterance 被 GC 导致不发声
+let audioUnlocked=false;
+function unlockAudio(){
+  if(audioUnlocked)return;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(AC){
+      const ctx=new AC();
+      const buf=ctx.createBuffer(1,1,22050);
+      const src=ctx.createBufferSource(); src.buffer=buf; src.connect(ctx.destination); src.start(0);
+      if(ctx.resume)ctx.resume();
+      audioUnlocked=true;
+    }
+  }catch(e){}
+}
 function speakText(text,lang,voiceURI){
   return new Promise(res=>{
     if(!('speechSynthesis' in window)){res();return;}
     const u=new SpeechSynthesisUtterance(text);
-    u.lang=lang||'en-US'; u.rate=0.95;
+    u.lang=lang||'en-US'; u.volume=1; u.rate=0.95;
     if(voiceURI){const v=speechSynthesis.getVoices().find(x=>x.voiceURI===voiceURI);if(v)u.voice=v;}
-    u.onend=()=>res(); u.onerror=()=>res();
+    let done=false;
+    const finish=()=>{if(done)return;done=true;clearTimeout(timer);res();};
+    u.onend=finish; u.onerror=finish;
+    // 兜底：部分移动端 onend 不触发，按预估时长推进
+    const est=1500+String(text).length*180;
+    const timer=setTimeout(finish,est);
+    curUtterance=u;
     speechSynthesis.speak(u);
   });
+}
+async function speakSegments(segs){
+  if(!('speechSynthesis' in window))return;
+  unlockAudio();
+  speechSynthesis.cancel();
+  await sleep(60); // 等 cancel 生效（iOS）
+  for(const s of segs){ await speakText(s.text,s.lang,s.voice); }
 }
 function primeTTS(){
   return new Promise(res=>{
     if(!('speechSynthesis' in window)){res();return;}
     try{
+      unlockAudio();
       const u=new SpeechSynthesisUtterance(' ');u.volume=0;u.lang='en-US';
       u.onend=()=>res();u.onerror=()=>res();
       speechSynthesis.cancel();speechSynthesis.speak(u);
@@ -570,7 +604,7 @@ function wordPartsHTML(w){
 }
 function renderPracticeList(words){
   $('#practiceList').innerHTML=words.map((w,i)=>`
-    <li data-i="${i}"><span class="idx">${i+1}</span><div class="pmain">${wordPartsHTML(w)}</div></li>`).join('');
+    <li data-i="${i}"><button class="pw-play" data-i="${i}" type="button" title="试听">🔊</button><span class="idx">${i+1}</span><div class="pmain">${wordPartsHTML(w)}</div></li>`).join('');
   $('#listCount').textContent=words.length?`${words.length} 词`:'';
 }
 function renderWordList(){
@@ -733,9 +767,7 @@ function init(){
     }
   });
   function previewWord(w){
-    speechSynthesis.cancel();
-    if(settings.readLang==='en'||settings.readLang==='both'){const t=prepareForTTS(w.en);if(t)speakText(t,enLang(),settings.enVoiceURI);}
-    if(settings.readLang==='zh'||settings.readLang==='both'){const t=prepareForTTSZh(w.zh);if(t)speakText(t,'zh-CN',settings.zhVoiceURI);}
+    speakSegments(wordSegments(w));
   }
 
   // practice
@@ -772,6 +804,14 @@ function init(){
   $('#selEnVoice').addEventListener('change',e=>{settings.enVoiceURI=e.target.value;saveSettings();});
   $('#selZhVoice').addEventListener('change',e=>{settings.zhVoiceURI=e.target.value;saveSettings();});
 
+  // 测试发音
+  $('#btnTestVoice').addEventListener('click',()=>{
+    speakSegments([
+      {text:'Hello, how are you?',lang:enLang(),voice:settings.enVoiceURI},
+      {text:'你好，能听到声音吗？',lang:'zh-CN',voice:settings.zhVoiceURI}
+    ]);
+  });
+
   // start/pause/stop
   $('#btnStart').addEventListener('click',startPractice);
   $('#btnPause').addEventListener('click',()=>{ctl.paused?resumePractice():pausePractice();});
@@ -785,10 +825,9 @@ function init(){
     if(idx<0||idx>=q.length)return;
     const item=q[idx];
     ctl.queue=q; ctl.pickWordId=item.word.id; ctl.resumeIndex=idx; ctl.index=idx;
-    if(ctl.running){speechSynthesis.cancel(); ctl.paused=true; ctl.running=false; ctl.token++;}
+    if(ctl.running){ctl.paused=true; ctl.running=false; ctl.token++;}
     highlightCurrent(); updatePlayControls();
-    speechSynthesis.cancel();
-    (async()=>{for(const s of item.segs){await speakText(s.text,s.lang,s.voice);}})();
+    speakSegments(item.segs);
   });
 
   // 应用当前设置到 UI
@@ -800,6 +839,8 @@ function init(){
 
   renderAll();
   refreshVoices();
+  // 部分移动端需首次交互后才加载语音列表
+  document.addEventListener('pointerdown',()=>refreshVoices(),{once:true});
 }
 function switchTab(t){
   $('#tabWordbank').classList.toggle('on',t==='wordbank');
