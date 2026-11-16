@@ -311,7 +311,13 @@ function refreshVoices(){
   const vs=speechSynthesis.getVoices()||[];
   enVoices=vs.filter(v=>/^en/i.test(v.lang));
   zhVoices=vs.filter(v=>/^zh/i.test(v.lang));
-  $('#voiceStatus').textContent=`英文 ${enVoices.length} · 中文 ${zhVoices.length}`;
+  const el=$('#voiceStatus');
+  if(vs.length===0){
+    el.textContent='⚠ 未检测到语音';
+    el.title='请用 Chrome 打开，并确认已安装「Google 文字转语音」引擎及语音数据';
+  }else{
+    el.textContent=`英文 ${enVoices.length} · 中文 ${zhVoices.length}`;
+  }
   fillVoiceSelects();
 }
 function pickDefault(list, patterns){
@@ -322,8 +328,6 @@ function defaultEn(){return pickDefault(enVoices,[/Google US English/i,/Samantha
 function defaultZh(){return pickDefault(zhVoices,[/Ting-Ting/i,/婷婷/i,/Huihui/i,/Xiaoxiao/i,/Meijia/i,/Chinese.*China/i,/普通话/i]);}
 function fillVoiceSelects(){
   const en=$('#selEnVoice'), zh=$('#selZhVoice');
-  if(!settings.enVoiceURI) settings.enVoiceURI=defaultEn();
-  if(!settings.zhVoiceURI) settings.zhVoiceURI=defaultZh();
   en.innerHTML='<option value="">系统默认</option>'+enVoices.map(v=>`<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI===settings.enVoiceURI?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
   zh.innerHTML='<option value="">系统默认</option>'+zhVoices.map(v=>`<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI===settings.zhVoiceURI?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
 }
@@ -806,6 +810,9 @@ function init(){
 
   // 测试发音
   $('#btnTestVoice').addEventListener('click',()=>{
+    if(('speechSynthesis' in window) && speechSynthesis.getVoices().length===0){
+      toast('未检测到语音引擎：请用 Chrome 打开，并在 系统设置→无障碍→文字转语音 里安装语音数据');
+    }
     speakSegments([
       {text:'Hello, how are you?',lang:enLang(),voice:settings.enVoiceURI},
       {text:'你好，能听到声音吗？',lang:'zh-CN',voice:settings.zhVoiceURI}
