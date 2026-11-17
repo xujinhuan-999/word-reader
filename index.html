@@ -185,6 +185,11 @@ details.advanced{margin-top:4px;}
         </div>
       </div>
       <div class="field">
+        <label>英文与中文之间停顿</label>
+        <select id="selLangGap"></select>
+        <p class="hint">仅英文+中文模式生效。</p>
+      </div>
+      <div class="field">
         <label>播放模式</label>
         <div class="seg" id="segMode">
           <button data-v="seq" class="on">顺序</button>
@@ -273,7 +278,7 @@ let selectedUnits=new Set();
 let settings={
   readLang:'both', mode:'seq', times:1, intervalMs:2000,
   hideEn:false, hideZh:false, hidePhonetic:false,
-  followUp:false, followUpDelay:3000, enVoiceURI:'', zhVoiceURI:''
+  followUp:false, followUpDelay:3000, langGapMs:1500, enVoiceURI:'', zhVoiceURI:''
 };
 function loadUnits(){try{units=JSON.parse(localStorage.getItem(LS_UNITS)||'[]');}catch(e){units=[];}if(!Array.isArray(units))units=[];}
 function saveUnits(){try{localStorage.setItem(LS_UNITS,JSON.stringify(units));}catch(e){}}
@@ -384,7 +389,10 @@ async function speakSegments(segs){
   unlockAudio();
   speechSynthesis.cancel();
   await sleep(60); // 等 cancel 生效（iOS）
-  for(const s of segs){ await speakText(s.text,s.lang,s.voice); }
+  for(let i=0;i<segs.length;i++){
+    if(i>0&&segs[i-1].lang!==segs[i].lang)await sleep(settings.langGapMs||0);
+    await speakText(segs[i].text,segs[i].lang,segs[i].voice);
+  }
 }
 function primeTTS(){
   return new Promise(res=>{
@@ -664,9 +672,14 @@ async function runLoop(queue,startIdx,token){
     const item=queue[i];
     for(let t=0;t<item.times;t++){
       if(token!==ctl.token)return;
-      for(const seg of item.segs){
+      for(let j=0;j<item.segs.length;j++){
         if(token!==ctl.token)return;
+        const seg=item.segs[j];
         await speakText(seg.text,seg.lang,seg.voice);
+        if(j<item.segs.length-1&&seg.lang!==item.segs[j+1].lang){
+          await sleep(settings.langGapMs||0);
+          if(token!==ctl.token)return;
+        }
       }
     }
     if(token!==ctl.token)return;
@@ -800,6 +813,9 @@ function init(){
   });
 
   bindSeg('segLang','readLang');
+  const langGaps=[500,1000,1500,2000,3000];
+  $('#selLangGap').innerHTML=langGaps.map(v=>`<option value="${v}" ${v===settings.langGapMs?'selected':''}>${v/1000} 秒</option>`).join('');
+  $('#selLangGap').addEventListener('change',e=>{settings.langGapMs=parseInt(e.target.value,10);saveSettings();});
   bindSeg('segMode','mode');
   // times seg
   const timesBox=$('#segTimes');
