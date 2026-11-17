@@ -215,7 +215,7 @@ details.advanced{margin-top:4px;}
       <details class="advanced">
         <summary>语音选择（高级）</summary>
         <div class="field" style="margin-top:8px;">
-          <label>英文语音</label>
+          <label>英文语音（默认自动优先美式自然语音）</label>
           <select id="selEnVoice"></select>
         </div>
         <div class="field">
@@ -324,11 +324,21 @@ function pickDefault(list, patterns){
   for(const p of patterns){const f=list.find(v=>p.test(v.name));if(f)return f.voiceURI;}
   return list.length?list[0].voiceURI:'';
 }
-function defaultEn(){return pickDefault(enVoices,[/Google US English/i,/Samantha/i,/Microsoft.*English/i,/Daniel/i]);}
+function defaultEn(){
+  const norm=s=>(s||'').replace('_','-').toLowerCase();
+  const us=enVoices.filter(v=>norm(v.lang)==='en-us');
+  const preferred=us.find(v=>/natural/i.test(v.name))
+    ||us.find(v=>/online/i.test(v.name))
+    ||us.find(v=>/google us english/i.test(v.name))
+    ||us.find(v=>/enhanced/i.test(v.name))
+    ||us.find(v=>/microsoft/i.test(v.name))
+    ||us[0];
+  return preferred?preferred.voiceURI:'';
+}
 function defaultZh(){return pickDefault(zhVoices,[/Ting-Ting/i,/婷婷/i,/Huihui/i,/Xiaoxiao/i,/Meijia/i,/Chinese.*China/i,/普通话/i]);}
 function fillVoiceSelects(){
   const en=$('#selEnVoice'), zh=$('#selZhVoice');
-  en.innerHTML='<option value="">系统默认</option>'+enVoices.map(v=>`<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI===settings.enVoiceURI?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
+  en.innerHTML='<option value="">自动选择美式语音</option>'+enVoices.map(v=>`<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI===settings.enVoiceURI?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
   zh.innerHTML='<option value="">系统默认</option>'+zhVoices.map(v=>`<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI===settings.zhVoiceURI?'selected':''}>${escapeHtml(v.name)} (${escapeHtml(v.lang)})</option>`).join('');
 }
 function langOf(uri){const v=speechSynthesis.getVoices().find(x=>x.voiceURI===uri);return v?v.lang:'';}
@@ -352,8 +362,13 @@ function speakText(text,lang,voiceURI){
   return new Promise(res=>{
     if(!('speechSynthesis' in window)){res();return;}
     const u=new SpeechSynthesisUtterance(text);
-    u.lang=lang||'en-US'; u.volume=1; u.rate=0.95;
-    if(voiceURI){const v=speechSynthesis.getVoices().find(x=>x.voiceURI===voiceURI);if(v)u.voice=v;}
+    let voice=voiceURI?speechSynthesis.getVoices().find(x=>x.voiceURI===voiceURI):null;
+    if(!voice && /^en/i.test(lang||'')){
+      const preferredURI=defaultEn();
+      voice=preferredURI?speechSynthesis.getVoices().find(x=>x.voiceURI===preferredURI):null;
+    }
+    u.lang=voice?voice.lang:(lang||'en-US'); u.volume=1; u.rate=1;
+    if(voice)u.voice=voice;
     let done=false;
     const finish=()=>{if(done)return;done=true;clearTimeout(timer);res();};
     u.onend=finish; u.onerror=finish;
